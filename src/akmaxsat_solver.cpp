@@ -9,7 +9,7 @@
 
 using namespace std;
 
-vector<int> solve_ising(string filename) {
+vector<int> solve_qubo(string filename) {
     ifstream istr(filename);
     CNF_Formula<long long> cf(istr);
 
