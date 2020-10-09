@@ -75,5 +75,8 @@ class AKMaxSATSolver(dimod.Sampler):
                 file.write("%d %d 0\n" % (-quadratic_corr[edge], -i))
                 file.write("%d %d %d 0\n" % (-quadratic_corr[edge], i, -j))
 
+    def sample_dimacs(self, filename):
+        return solve_qubo(filename)
+
 
 AKMaxSATSampler = AKMaxSATSolver
