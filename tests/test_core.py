@@ -7,8 +7,7 @@ from pyakmaxsat import AKMaxSATSolver
 
 def main():
     N = 15
-    Q = {(i, j): random.randint(-5, 5)
-         for i in range(N) for j in range(i, N)}
+    Q = {(i, j): random.randint(-5, 5) for i in range(N) for j in range(i, N)}
 
     # bqm_spin = dimod.BinaryQuadraticModel.from_ising(Q)
     # Q, offset = bqm_spin.to_qubo()

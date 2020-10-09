@@ -40,7 +40,7 @@ class AKMaxSATSolver(dimod.Sampler):
         file_ID, filename = tempfile.mkstemp()
         try:
             with os.fdopen(file_ID, 'w') as f:
-                self.convert_to_cnf(linear, quadratic, f)
+                AKMaxSATSolver.convert_to_wcnf(linear, quadratic, f, self.precision)
             raw_solution = solve_qubo(filename)
         finally:
             os.remove(filename)
@@ -48,11 +48,12 @@ class AKMaxSATSolver(dimod.Sampler):
         solution = np.where(np.array(raw_solution) == -1, 1, 0)
         return dimod.SampleSet.from_samples_bqm(np.array(solution), bqm)
 
-    def convert_to_cnf(self, linear, quadratic, file):
+    @staticmethod
+    def convert_to_wcnf(linear, quadratic, file, precision=1e-6):
         num_variables = len(linear)
 
-        linear_corr = np.round(np.array(linear) / self.precision)
-        quadratic_corr = np.round(np.array(quadratic)[:, 2] / self.precision)
+        linear_corr = np.round(np.array(linear) / precision)
+        quadratic_corr = np.round(np.array(quadratic)[:, 2] / precision)
         num_clauses = np.count_nonzero(linear_corr) \
             + np.count_nonzero(quadratic_corr > 0) \
             + 2 * np.count_nonzero(quadratic_corr < 0)
@@ -76,7 +77,20 @@ class AKMaxSATSolver(dimod.Sampler):
                 file.write("%d %d %d 0\n" % (-quadratic_corr[edge], i, -j))
 
     def sample_dimacs(self, filename):
-        return solve_qubo(filename)
+        if os.path.isfile(filename):
+            return solve_qubo(filename)
+        else:
+            raise ValueError('not found: %s' % filename)
 
 
+# Alias
 AKMaxSATSampler = AKMaxSATSolver
+
+
+def save_wcnf(Q, filename, precision=1e-6):
+    bqm = dimod.BinaryQuadraticModel.from_qubo(Q)
+    linear = [v for v in bqm.linear.values()]
+    quadratic = [[i, j, v] for (i, j), v in bqm.quadratic.items()]
+
+    with open(filename, 'w') as f:
+        AKMaxSATSolver.convert_to_wcnf(linear, quadratic, f, precision)
