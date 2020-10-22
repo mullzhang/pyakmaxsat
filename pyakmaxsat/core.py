@@ -34,7 +34,7 @@ class AKMaxSATSolver(dimod.Sampler):
 
     def sample_qubo(self, Q):
         bqm = dimod.BinaryQuadraticModel.from_qubo(Q)
-        linear = [v for v in bqm.linear.values()]
+        linear = [v for i, v in sorted(bqm.linear.items(), key=lambda x: x[0])]
         quadratic = [[i, j, v] for (i, j), v in bqm.quadratic.items()]
 
         file_ID, filename = tempfile.mkstemp()
@@ -104,7 +104,7 @@ AKMaxSATSampler = AKMaxSATSolver
 
 def save_wcnf(Q, filename, precision=1e-6):
     bqm = dimod.BinaryQuadraticModel.from_qubo(Q)
-    linear = [v for v in bqm.linear.values()]
+    linear = [v for i, v in sorted(bqm.linear.items(), key=lambda x: x[0])]
     quadratic = [[i, j, v] for (i, j), v in bqm.quadratic.items()]
 
     with open(filename, 'w') as f:
