@@ -2,18 +2,20 @@ import random
 
 import dimod
 
-from pyakmaxsat import AKMaxSATSolver
+from pyakmaxsat import AKMaxSATSolver, save_wcnf
 
 
 def main():
     N = 15
     Q = {(i, j): random.randint(-5, 5) for i in range(N) for j in range(i, N)}
 
+    save_wcnf(Q, 'Q.wcnf', precision=1e-4)
+
     # bqm_spin = dimod.BinaryQuadraticModel.from_ising(Q)
     # Q, offset = bqm_spin.to_qubo()
     # bqm_binary = dimod.BinaryQuadraticModel.from_qubo(Q, offset)
 
-    solver = AKMaxSATSolver()
+    solver = AKMaxSATSolver(precision=1e-4)
     exact_solver = dimod.ExactSolver()
 
     # sampleset = solver.sample_ising(h, J)

@@ -50,33 +50,48 @@ class AKMaxSATSolver(dimod.Sampler):
 
     @staticmethod
     def convert_to_wcnf(linear, quadratic, file, precision=1e-6):
-        num_variables = len(linear)
-
         linear_corr = np.round(np.array(linear) / precision)
         quadratic_corr = np.round(np.array(quadratic)[:, 2] / precision)
-        num_clauses = np.count_nonzero(linear_corr) \
-            + np.count_nonzero(quadratic_corr > 0) \
-            + 2 * np.count_nonzero(quadratic_corr < 0)
 
-        file.write("p wcnf %d %d\n" % (num_variables, num_clauses))
-
-        for i in range(num_variables):
+        _linear = {}
+        for i, _ in enumerate(linear):
             if linear_corr[i] == 0:
                 continue
-            file.write("%d %d 0\n" %
-                       (np.abs(linear_corr[i]), np.sign(linear_corr[i]) * (i + 1)))
+            _linear[np.sign(linear_corr[i]) * (i + 1)] = np.abs(linear_corr[i])
 
-        for edge in range(len(quadratic)):
+        _quadratic = {}
+        for edge, _ in enumerate(quadratic):
             i = quadratic[edge][0] + 1
             j = quadratic[edge][1] + 1
 
             if quadratic[edge][2] > 0:
-                file.write("%d %d %d 0\n" % (quadratic_corr[edge], i, j))
+                _quadratic[(i, j)] = _quadratic.get((i, j), 0) + quadratic_corr[edge]
             elif quadratic[edge][2] < 0:
-                file.write("%d %d 0\n" % (-quadratic_corr[edge], -i))
-                file.write("%d %d %d 0\n" % (-quadratic_corr[edge], i, -j))
+                _linear[-i] = _linear.get(-i, 0) - quadratic_corr[edge]
+                _quadratic[(i, -j)] = _quadratic.get((i, -j), 0) - quadratic_corr[edge]
 
-    def sample_dimacs(self, filename):
+        _linear_reduced = {}
+        for i, _ in enumerate(linear):
+            weight = _linear.get(i, 0) - _linear.get(-i, 0)
+            if weight > 0:
+                _linear_reduced[i] = weight
+            elif weight < 0:
+                _linear_reduced[-i] = -weight
+
+        num_variables = len(linear)
+        num_clauses = len(_linear_reduced) + len(_quadratic)
+        file.write("p wcnf %d %d\n" % (num_variables, num_clauses))
+
+        for i, v in _linear_reduced.items():
+            if v == 0:
+                continue
+            file.write("%d %d 0\n" % (v, i))
+        for (i, j), v in _quadratic.items():
+            if v == 0:
+                continue
+            file.write("%d %d %d 0\n" % (v, i, j))
+
+    def sample_wcnf(self, filename):
         if os.path.isfile(filename):
             return solve_qubo(filename)
         else:
