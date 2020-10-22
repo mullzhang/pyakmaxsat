@@ -24,7 +24,7 @@ from pyakmaxsat import AKMaxSATSolver
 
 N = 15
 h = {}
-J = {(i, j): random.gauss(0, 1)
+J = {(i, j): random.randint(-5, 5)
      for i in range(N) for j in range(i + 1, N)}
 
 solver = AKMaxSATSolver(precision=1e-6)

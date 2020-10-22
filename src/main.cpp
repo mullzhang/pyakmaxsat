@@ -5,5 +5,5 @@
 PYBIND11_MODULE(cxxakmaxsat, m) {
     m.doc() = "Python binding of AK-MaxSAT";
 
-    m.def("solve_ising", &solve_ising, "Solve Ising model");
+    m.def("solve_qubo", &solve_qubo, "Solve QUBO problem");
 }

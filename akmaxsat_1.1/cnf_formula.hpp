@@ -17,6 +17,7 @@
 */
 
 #ifndef CNF_FORMULA_HPP_INCLUDE
+
 #define CNF_FORMULA_HPP_INCLUDE
 
 #include <cmath>
@@ -27,7 +28,6 @@
 
 #include "clauses.hpp"
 #include "restore_list.hpp"
-
 using namespace std;
 
 //! The class CNF_Formula maintains the states of the CNF_Formula during
@@ -37,6 +37,18 @@ class CNF_Formula {
     // private variables
     //! clause number to indicate a unit clause
     const static int UNIT_CLAUSE = 1;
+#ifdef FUIP
+    vector<int> bla;
+    vector<int> *tadj;
+    int succ_cnt_fuip, total_cnt_fuip;
+    int *Q2;
+    char *visit2;
+    int *ref_cnt;
+#endif
+#ifdef STATS
+    int *explored;
+    long long *sum_cost;
+#endif
     //! all clauses of the CNF formula
     Clauses all_clauses;
     //! boolean flag which indicates if the given formula has weighted clauses
@@ -124,7 +136,14 @@ class CNF_Formula {
     //! number of generalized unit propagations which produced a lower bound >=
     //! bestCost
     int succ_gup;
-
+#ifdef PROP_LIST
+    //! stack which contains literals which can be propagated
+    int *propagation_stack;
+    //! number of literals which can be propagated
+    int propagation_stack_size;
+    //! position of literal i on the propagation stack
+    int *onstack;
+#endif
     //! list of clauses which were changed during lower bound calculation
     vector<int> changed;
     // height transform
@@ -152,6 +171,9 @@ class CNF_Formula {
     }
     //! delete clauses which are fulfilled by setting literal L to true
     inline void deleteFulfilled(int L) {
+#ifdef DEBUG
+        cout << "delete fulfilled" << endl;
+#endif
         assert(!assigned_values[abs(L)]);
         vector<int> &appears2 = appears[L];
         assert(appears_len[L] == (int)appears2.size());
@@ -173,17 +195,41 @@ class CNF_Formula {
                     assert(literals[0] == L || literals[1] == L);
                     W_binary[literals[0]] -= all_clauses.getWeight(it);
                     W_binary[literals[1]] -= all_clauses.getWeight(it);
+#ifdef PROP_LIST
+/*
+                                        // the following lines can be used to
+   find a propagation variable - usually it does not improve speed int i = 0; if
+   (literals[0] == L) i = 1; if (onstack[-literals[i]] < 0 &&
+   getLength(literals[i]) <= W_unit[-literals[i]]) { onstack[-literals[i]] =
+   propagation_stack_size; propagation_stack[propagation_stack_size++] =
+   -literals[i];
+                                        }
+*/
+#endif
                 }
                 // update W_large
                 else {
                     const int_c *literals = all_clauses.getLiterals(it);
                     ULL w = all_clauses.getWeight(it);
+#ifndef NDEBUG
                     bool found = false;
-
+#endif
                     for (int i = all_clauses.getLength(it) - 1; i >= 0; --i) {
                         W_large[literals[i]] -= w;
-
+#ifndef NDEBUG
                         if (literals[i] == L) found = true;
+#endif
+#ifdef PROP_LIST
+/*
+                                                // the following lines can be
+   used to find a propagation variable - usually it does not improve speed if
+   (literals[i] != L && onstack[-literals[i]] < 0 && getLength(literals[i]) <=
+   W_unit[-literals[i]]) { onstack[-literals[i]] = propagation_stack_size;
+                                                        propagation_stack[propagation_stack_size++]
+   = -literals[i];
+                                                }
+*/
+#endif
                     }
                     assert(found);
                 }
@@ -224,6 +270,9 @@ class CNF_Formula {
     //! remove literal L from clauses in the formula
     inline ULL removeLiteral(int L) {
         assert(L >= -nVars && L <= nVars && L != 0);
+#ifdef DEBUG
+        cout << "trying to remove literal " << L << endl;
+#endif
         assert(W_unit_save[L] == W_unit[L]);
         int l;
         assert((int)appears[L].size() == appears_len[L]);
@@ -261,12 +310,27 @@ class CNF_Formula {
                     // unary resolution of literal, -literal may become possible
                     unary_resolution(literal);
                     assert(!assigned_values[abs(literal)]);
+#ifdef PROP_LIST
+                    // check if literal can be propagated
+                    if (onstack[literal] < 0 &&
+                        W_unit[literal] + (TL)cost[n_assigned] >=
+                            (TL)bestCost) {
+                        onstack[literal] = propagation_stack_size;
+                        propagation_stack[propagation_stack_size++] = literal;
+                    }
+#endif
                     // set delete flag for unit clauses
                     all_clauses.addDeleteFlag2Clause(it);
                 }
             }
         }
         appears_len[L] = (int)appears[L].size();
+#ifndef NDEBUG
+        for (vector<int>::const_iterator it = appears[L].begin();
+             it < appears[L].end(); ++it)
+            assert(all_clauses.getDeleteFlag(*it) == false ||
+                   all_clauses.getLength(*it) == 1);
+#endif
         return W_unit[L] > (TL)MAXWEIGHT ? MAXWEIGHT : (ULL)W_unit[L];
     }
     //! propagate literal -L, set L to false
@@ -274,8 +338,17 @@ class CNF_Formula {
         assert(vars_top >= 0 && L == -vars[vars_top]);
         assert(L >= -nVars && L <= nVars && L != 0);
         assert(!assigned_values[abs(L)]);
+#ifdef DEBUG
+        printf("propagating %d\n", L);
+#endif
         all_clauses.assignVariable(L);
         vector<int> &appears2 = appears[L];
+#ifndef NDEBUG
+        for (vector<int>::reverse_iterator it = appears2.rbegin();
+             it < appears2.rbegin() + ((int)appears2.size() - appears_len[L]);
+             ++it)
+            assert(all_clauses.getDeleteFlag(*it) == true);
+#endif
         for (vector<int>::reverse_iterator it =
                  appears2.rbegin() + ((int)appears2.size() - appears_len[L]);
              it < appears2.rend(); ++it) {
@@ -333,7 +406,23 @@ class CNF_Formula {
                 W_binary[L] += all_clauses.getWeight(*it);
                 W_unit[literal] -= all_clauses.getWeight(*it);
                 W_unit_save[literal] -= all_clauses.getWeight(*it);
-
+#ifdef PROP_LIST
+/*
+                                // the following lines remove a literal from the
+   propagation stack in case it cannot be propagated anymore
+                                // usually it is no speedup to do this
+                                if (onstack[literal] >= 0 &&
+   getUnitLength(literal) < getLength(-literal) && W_unit[literal] +
+   (TL)cost[n_assigned + 1] < (TL)bestCost) { int pos = onstack[literal]; if
+   (pos != propagation_stack_size-1) { propagation_stack[pos] =
+   propagation_stack[propagation_stack_size-1]; onstack[propagation_stack[pos]]
+   = pos;
+                                        }
+                                        onstack[literal] = -1;
+                                        --propagation_stack_size;
+                                }
+*/
+#endif
                 // check if the clause needs to be inserted into the appears
                 // list this is the case if the appears list of literal was
                 // traversed after L was assigned false (which happened with
@@ -377,12 +466,18 @@ class CNF_Formula {
         // count how many clauses in the inconsistent subformula depend on
         // propagating L
         int propagated = 0;
+#ifdef FUIP
+        bla.clear();
+#endif
         for (vector<int>::const_iterator it = appears2.begin();
              it < appears2.begin() + appears_len[L]; ++it) {
             assert(!all_clauses.getDeleteFlag(*it));
             // if clause has a marker flag, it belongs to inconsistent
             // subformula
             if (all_clauses.getMarker(*it)) {
+#ifdef FUIP
+                bla.push_back(*it);
+#endif
                 ++propagated;
             }
             all_clauses.increaseLength(*it);
@@ -684,9 +779,11 @@ class CNF_Formula {
         }
         appears_len[L] = (int)appears[L].size();
         appears_traversed[L] = timestamp++;
+#ifndef NDEBUG
         for (vector<int>::const_iterator it = appears[L].begin();
              it != appears[L].end(); ++it)
             assert(all_clauses.getDeleteFlag(*it) == false);
+#endif
         assert(!assigned_values[abs(L)]);
         return cnt;
     }
@@ -700,6 +797,9 @@ class CNF_Formula {
     //! remove inconsistent subformula (possibly use inference rules for
     //! transformation)
     void resolveConflict() {
+#ifdef DEBUG
+        cout << "resolveConflict" << endl;
+#endif
         int t, pos = -1, other = 0;
         // first extract inconsistent subformula -> stored in take_back
         assert(take_back.empty());
@@ -720,6 +820,11 @@ class CNF_Formula {
         ULL minweight = MAXWEIGHT;
         // process the propagation stack in reverse order
         for (int *it = vars + vars_top; it >= vars; --it) {
+#ifdef DEBUG
+            if (literal_data[*it] == 0)
+                for (int i = 0; i <= vars_top; ++i)
+                    printf("vars[%d] = %d\n", i, vars[i]);
+#endif
             assert(literal_data[*it] > 0);
             // check if literal -*it occurred in marked clauses (i. e. *it needs
             // to be propagated to yield the conflict clause)
@@ -1032,7 +1137,193 @@ class CNF_Formula {
             saveSubtraction(needed_for_skip, minweight);
             minweight = 0;
             unary_resolution(other);
-        } else {
+#ifdef PROP_LIST
+            if (onstack[-other] < 0 &&
+                W_unit[-other] + (TL)cost[n_assigned] >= (TL)bestCost) {
+                onstack[-other] = propagation_stack_size;
+                propagation_stack[propagation_stack_size++] = -other;
+            }
+#endif
+        }
+        /*
+        // the following lines can be used to do Max-SAT resolution yielding an
+empty clause else if (take_back.size() <= 5) { bool added = false; int len =
+take_back[0] > UNIT_CLAUSE?all_clauses.getLength(take_back[0]):1; int maxlen =
+100, maxlen2 = 100, len2; if (len > maxlen) maxlen = len; int *nclause = new
+int[maxlen]; int *nclause2 = new int[maxlen2]; const int *literals; if (len ==
+1) nclause[0] = take_back[0]+nVars; else memcpy(nclause,
+all_clauses.getLiterals(take_back[0]), len*sizeof(int));
+                vector<int>::const_iterator it, it2;
+                // now do resolution
+                for (it=which.begin(), it2=take_back.begin()+1; it!=which.end();
+++it,++it2) { assert(len > 0); len2 = *it2 >
+UNIT_CLAUSE?all_clauses.getLength(*it2) : 1; if (len2 > maxlen2) { maxlen2 *= 2;
+                                while(len2 > maxlen2)
+                                        maxlen2 *= 2;
+                                delete [] nclause2;
+                                nclause2 = new int[maxlen2];
+                        }
+                        if (len2 == 1) {
+                                assert(*it2 <= UNIT_CLAUSE);
+                                nclause2[0] = *it2 + nVars;
+                        }
+                        else {
+                                literals = all_clauses.getLiterals(*it2);
+                                memcpy(nclause2, literals, len2 * sizeof(int));
+                        }
+                        // move literal *it to the end
+#ifndef NDEBUG
+                        bool found = false;
+#endif
+                        for (int i=0; i<len; ++i)
+                                if (nclause[i] == -*it) {
+                                        swap(nclause[len-1], nclause[i]);
+#ifndef NDEBUG
+                                        found = true;
+#endif
+                                        break;
+                                }
+#ifndef NDEBUG
+#ifdef DEBUG
+                        if (!found) {
+                                printf("looking for literal %d\n",-*it);
+                                for (int i=0; i<len; ++i)
+                                        printf("%d ", nclause[i]);
+                                puts("");
+                        }
+#endif
+                        assert(found);
+                        found = false;
+#endif
+                        for (int i=0; i<len2; ++i)
+                                if (nclause2[i] == *it) {
+                                        swap(nclause2[len2-1], nclause2[i]);
+#ifndef NDEBUG
+                                        found = true;
+#endif
+                                        break;
+                                }
+#ifndef NDEBUG
+#ifdef DEBUG
+                        if (!found) {
+                                printf("looking for literal %d\n",*it);
+                                for (int i=0; i<len2; ++i)
+                                        printf("%d ", nclause2[i]);
+                                puts("");
+                        }
+#endif
+                        assert(found);
+#endif
+                        --len;
+                        --len2;
+                        // determine common literals
+                        sort(nclause, nclause+len);
+#ifndef NDEBUG
+                        for (int i=1; i<len; ++i)
+                                assert(nclause[i] != nclause[i-1]);
+#endif
+                        sort(nclause2, nclause2+len2);
+                        assert(nclause[len] == -nclause2[len2]);
+                        int l = len-1;
+                        for (int i=len-1, j=len2-1; i>=0 && j>=0; ) {
+                                if (nclause[i] == nclause2[j]) {
+                                        swap(nclause[l--], nclause[i--]);
+                                        nclause2[j--] = nclause2[--len2];
+                                }
+                                else if (nclause[i] < nclause2[j])
+                                        --j;
+                                else
+                                        --i;
+                        }
+                        if (len + len2 + 1 > maxlen) {
+                                maxlen *= 2;
+                                while(len + len2 + 1 > maxlen)
+                                        maxlen *= 2;
+                                int *temp = new int[maxlen];
+                                memcpy(temp, nclause, sizeof(int) * len);
+                                swap(nclause, temp);
+                                delete [] temp;
+                        }
+                        // add compensation clauses
+                        if (len2 > 0) {
+                                memcpy(nclause+len+1, nclause2,
+len2*sizeof(int)); assert(nclause[len] == -*it); for (int i=len+1; i<=len+len2;
+++i) { nclause[i] = -nclause[i]; if (i > len+1) nclause[i-1] = -nclause[i-1];
+                                        int c = all_clauses.addClause(nclause,
+i+1, minweight); for (int j=0; j<=i; ++j) { if (i+1 == 2) W_binary[nclause[j]]
++= minweight; else W_large[nclause[j]] += minweight; do_insert(nclause[j], c);
+                                        }
+                                        rlist.addEntry(c);
+                                        added = true;
+                                }
+                                nclause[len + len2] = -nclause[len + len2];
+#ifndef NDEBUG
+                                for (int i=0; i<len2; ++i)
+                                        assert(nclause[len+i+1] == nclause2[i]);
+#endif
+                        }
+                        nclause[len] = -nclause[len];
+                        assert(nclause[len] == *it);
+                        for (int i=l; i>=0; --i) {
+                                nclause[i] = -nclause[i];
+                                if (i < l)
+                                        nclause[i+1] = -nclause[i+1];
+                                int c = all_clauses.addClause(nclause+i,
+len+len2+1-i, minweight); for (int j=i; j<=len+len2; ++j) { if (len+len2+1-i ==
+2) W_binary[nclause[j]] += minweight; else W_large[nclause[j]] += minweight;
+                                        do_insert(nclause[j], c);
+                                }
+                                rlist.addEntry(c);
+                                added = true;
+                        }
+                        if (l >= 0)
+                                nclause[0] = -nclause[0];
+                        nclause[len] = nclause[len+len2];
+                        len += len2;
+                }
+                assert(it == which.end() && it2 == take_back.end());
+#ifdef DEBUG
+                if (len > 0) {
+                        printf("len = %d\n", len);
+                        for (int i=0; i<len; ++i)
+                                printf("%d ", nclause[i]);
+                        puts("");
+                }
+#endif
+                assert(len == 0);
+                delete [] nclause;
+                delete [] nclause2;
+                which.clear();
+                assert(minweight > 0);
+                if (added)
+                        rlist.commit(timestamp++, minweight, true);
+                saveAddition(cost[n_assigned], minweight);
+                saveSubtraction(needed_for_skip, minweight);
+                for (vector<int>::const_iterator it=take_back.begin();
+it!=take_back.end(); ++it) { rlist.addEntry(*it); if (*it > 0) { if
+(all_clauses.getLength(*it) == 2) { const int *literals =
+all_clauses.getLiterals(*it); W_binary[literals[0]] -= minweight;
+                                        W_binary[literals[1]] -= minweight;
+                                }
+                                else {
+                                        const int *literals =
+all_clauses.getLiterals(*it); for (int j=all_clauses.getLength(*it)-1; j>=0;
+--j) W_large[literals[j]] -= minweight;
+                                }
+                                all_clauses.subtractWeight(*it, minweight,
+true);
+                        }
+                        else {
+                                assert(W_unit[*it + nVars] >= 0);
+                                W_unit_save[*it + nVars] -= minweight;
+                        }
+                }
+                rlist.commit(timestamp++, minweight, false);
+                take_back.clear();
+                return;
+        }
+        */
+        else {
             // no transformation, just remove inconsistent subformula
             for (vector<int>::const_iterator it = take_back.begin();
                  it != take_back.end(); ++it)
@@ -1057,6 +1348,9 @@ class CNF_Formula {
     }
     //! restore the clauses changed by the lowerbound function
     void restoreClauses(int L) {
+#ifdef DEBUG
+        cout << "restoreClauses" << endl;
+#endif
         int length;
         long long deletion_time;
         ULL minweight;
@@ -1113,6 +1407,7 @@ class CNF_Formula {
                 if (all_clauses.getDeleteFlag(clause_id)) {
                     assert(!wasDeleted);
                     // in that case the clause can be permanently deleted
+#ifndef NDEBUG
                     const int_c *literals = all_clauses.getLiterals(clause_id);
                     for (int i = all_clauses.getLength(clause_id) - 1; i >= 0;
                          --i) {
@@ -1134,6 +1429,7 @@ class CNF_Formula {
                              it != appears[i].end(); ++it)
                             assert(*it != clause_id);
                     }
+#endif
                     // call the prepareDelete function which stores the number
                     // of active references to the clause
                     all_clauses.prepareDelete(clause_id);
@@ -1149,6 +1445,7 @@ class CNF_Formula {
                 const int_c *literals = all_clauses.getLiterals(clause_id);
                 // reinsert clause pointers into the appears lists where needed
                 for (int i = 0; i < l; ++i) {
+#ifndef NDEBUG
                     bool found = false;
                     for (vector<int>::const_iterator it =
                              appears[literals[i]].begin();
@@ -1157,24 +1454,30 @@ class CNF_Formula {
                             found = true;
                             break;
                         }
+#endif
                     assert(appears_len[literals[i]] ==
                            (int)appears[literals[i]].size());
                     if (appears_traversed[literals[i]] > deletion_time) {
+#ifndef NDEBUG
                         if (found)
                             cout << "here with " << literals[i] << " "
                                  << all_clauses.getLength(clause_id) << " "
                                  << appears_traversed[literals[i]] << " "
                                  << deletion_time << endl;
                         assert(!found);
+#endif
                         appears[literals[i]].push_back(clause_id);
                         ++appears_len[literals[i]];
-                    } else {
+                    }
+#ifndef NDEBUG
+                    else {
                         if (!found)
                             cout << "here2 " << all_clauses.getLength(clause_id)
                                  << " " << appears_traversed[literals[i]] << " "
                                  << deletion_time << endl;
                         assert(found);
                     }
+#endif
                 }
             }
         }
@@ -1212,6 +1515,14 @@ class CNF_Formula {
                    !assigned_values[abs(l1)]);
             W_unit[l1] += minweight;
             W_unit_save[l1] += minweight;
+#ifdef PROP_LIST
+            // check if the literal l1 can be propagated
+            if (onstack[l1] < 0 &&
+                W_unit[l1] + (TL)cost[n_assigned] >= (TL)bestCost) {
+                onstack[l1] = propagation_stack_size;
+                propagation_stack[propagation_stack_size++] = l1;
+            }
+#endif
             rlist.addEntry(l1 - nVars);
             // add compensation clauses (-l1, l2, l3) and (l1, -l2, -l3)
             // also update the weights according to the new clauses
@@ -1265,6 +1576,9 @@ class CNF_Formula {
     }
     //! check if literal L is a failed literal
     inline bool detectFailedLiteral(int L) {
+#ifdef DEBUG
+        cout << "detectFailedLiteral L = " << L << endl;
+#endif
         // propagated literal L
         vars[++vars_top] = L;
         assert(literal_data[L] <= 0);
@@ -1312,6 +1626,9 @@ class CNF_Formula {
     }
     //! check if there is a conflict using generalized unit propagation
     bool detectConflictFl(bool &fl, int &iv, int &iv2) {
+#ifdef DEBUG
+        cout << "detectConflictFl" << endl;
+#endif
         head = tail = 0;
         int L, fL;
         fl = false;
@@ -1337,6 +1654,9 @@ class CNF_Formula {
             }
             // uncomment the following two lines if only unit propagation and
             // failed literal detection should be used
+#ifdef NO_GUP
+            if (!found && fl) break;
+#endif
             if (!found) {
                 int save_head = head;
                 int save_vars_top = vars_top;
@@ -1465,6 +1785,16 @@ class CNF_Formula {
                                      literals1[1] == -literals3[1 - i2]) ||
                                     (literals1[0] == -literals3[1 - i2] &&
                                      literals1[1] == -literals2[1 - i1]))) {
+#ifdef DEBUG
+                        const int *literals = all_clauses.getLiterals(c1);
+                        printf("(%d %d) ", literals[0], literals[1]);
+                        literals = all_clauses.getLiterals(c2);
+                        printf("(%d %d) ", literals[0], literals[1]);
+                        literals = all_clauses.getLiterals(c3);
+                        printf("(%d %d) -> %d +-(%d %d %d)\n", literals[0],
+                               literals[1], literals2[i1], -literals2[i1],
+                               literals1[0], literals1[1]);
+#endif
                         int other = literals2[i1];
                         if (process_cycle_clauses(c1, c2, c3, literals2[i1],
                                                   literals1[0], literals1[1]))
@@ -1481,6 +1811,9 @@ class CNF_Formula {
     }
     //! resolve the conflict and extract inconsistent subformula
     void resolveConflictFl() {
+#ifdef DEBUG
+        cout << "resolveConflictFl" << endl;
+#endif
         assert(vars_top >= 0);
         assert(literal_data[-vars[vars_top]] > 0);
         assert(take_back.empty());
@@ -1504,6 +1837,14 @@ class CNF_Formula {
         // undo propagations, thereby checking if the clause was needed for
         // deriving the conflict clause
         for (int *it = vars + vars_top; it >= vars; --it) {
+#ifdef DEBUG
+            printf("cur = %d implication_list.size() = %d\n", *it,
+                   (int)unit_implication_list[-*it].size());
+            if (literal_data[*it] == 0)
+                for (int i = 0; i <= vars_top; ++i)
+                    printf("vars[%d] = %d %d\n", i, vars[i],
+                           (int)unit_implication_list[-vars[i]].size());
+#endif
             assert(literal_data[*it] > 0);
             if ((t = addLiteralConflict(-*it))) {
                 // t indicates the number of marked clauses which include
@@ -1721,6 +2062,16 @@ class CNF_Formula {
                                      literals1[1] == -literals3[1 - i2]) ||
                                     (literals1[0] == -literals3[1 - i2] &&
                                      literals1[1] == -literals2[1 - i1]))) {
+#ifdef DEBUG
+                        const int *literals = all_clauses.getLiterals(c1);
+                        printf("(%d %d) ", literals[0], literals[1]);
+                        literals = all_clauses.getLiterals(c2);
+                        printf("(%d %d) ", literals[0], literals[1]);
+                        literals = all_clauses.getLiterals(c3);
+                        printf("(%d %d) -> %d +-(%d %d %d)\n", literals[0],
+                               literals[1], literals2[i1], -literals2[i1],
+                               literals1[0], literals1[1]);
+#endif
                         int other = literals2[i1];
                         if (process_cycle_clauses(c1, c2, c3, literals2[i1],
                                                   literals1[0], literals1[1]))
@@ -1737,25 +2088,51 @@ class CNF_Formula {
     }
     //! extract clauses which are in conflict with the failed literal
     int resolveFailedLiteral(int save_vars_top) {
+#ifdef DEBUG
+        cout << "resolveFailedLiteral" << endl;
+#endif
         assert(vars_top > save_vars_top);
         assert(literal_data[-vars[vars_top]] > 0);
         assert(which.empty());
         which.push_back(literal_data[-vars[vars_top]]);
+#ifndef NDEBUG
         for (int *it = vars; it <= vars + vars_top; ++it)
             assert(*it != -vars[vars_top]);
+#endif
         literal_data[-vars[vars_top]] = 0;
         assert(which.back() != UNIT_CLAUSE);
         all_clauses.addMarker2Clause(which.back());
         int t, var = 0, pos = 0;
         vector<int> vars2;
+#ifdef FUIP
+        int pos2 = 0;
+        ref_cnt[0] = 0;
+#endif
         // process propagation stack in reverse order
         for (int *it = vars + vars_top; it > vars + save_vars_top; --it) {
+#ifdef DEBUG
+            if (literal_data[*it] == 0)
+                for (int i = 0; i <= vars_top; ++i)
+                    printf("vars[%d] = %d\n", i, vars[i]);
+#endif
             assert(literal_data[*it] > 0);
             if ((t = addLiteralConflict(-*it))) {
                 if (t > 1) {
                     pos = which.size();
                     var = *it;
                 }
+#ifdef FUIP
+                vars2.push_back(*it);
+                int cur = which.size();
+                ref_cnt[cur] = 0;
+                for (vector<int>::const_iterator it2 = bla.begin();
+                     it2 != bla.end(); ++it2) {
+                    int t = distance(which.begin(),
+                                     find(which.begin(), which.end(), *it2));
+                    tadj[cur].push_back(t);
+                    ++ref_cnt[t];
+                }
+#endif
                 which.push_back(literal_data[*it]);
                 assert(it == vars + save_vars_top + 1 ||
                        literal_data[*it] != UNIT_CLAUSE);
@@ -1767,6 +2144,41 @@ class CNF_Formula {
             }
             literal_data[*it] = 0;
         }
+#ifdef FUIP
+        int l2 = 0;
+        for (int i = 0; i < (int)which.size(); ++i) {
+            if (ref_cnt[i] == 0) Q2[l2++] = i;
+            visit2[i] = 0;
+        }
+        int work_cnt = 0;
+        for (int i = 0; i < l2; ++i) {
+            int cur = Q2[i];
+            if (l2 - i == 1 && !work_cnt && cur) pos2 = cur;
+            for (vector<int>::const_iterator it = tadj[cur].begin();
+                 it != tadj[cur].end(); ++it) {
+                if (!visit2[*it]) {
+                    ++work_cnt;
+                    visit2[*it] = 1;
+                }
+                if (--ref_cnt[*it] == 0) {
+                    Q2[l2++] = *it;
+                    --work_cnt;
+                }
+            }
+            tadj[cur].clear();
+        }
+        if (pos < (int)which.size() - 1) ++total_cnt_fuip;
+        if (pos < pos2)
+            fprintf(stderr, "error: here with pos = %d, pos2 = %d\n", pos,
+                    pos2);
+        else if (pos > pos2) {
+            ++succ_cnt_fuip;
+        }
+#endif
+        // no FUIP - uncomment next line
+#ifdef NO_FUIP
+        pos = which.size() - 1;
+#endif
         assert(var != 0);
         assert(head == tail);
         vars_top = save_vars_top;
@@ -1830,8 +2242,157 @@ class CNF_Formula {
             ++succ_gup;
             return;
         }
+#ifdef CALC_MH
+        reverse(literal_order, literal_order + l);
+        psi.clear();
+        for (int ii = 0; ii < l; ++ii) {
+            int i = literal_order[ii].second;
+            ptr[i].clear();
+        }
+        int c = 0, c2 = 0;
+        for (int ii = 0; ii < l; ++ii) {
+            int i = literal_order[ii].second;
+            if (W_unit[i] > 0) {
+                ++c;
+                ++c2;
+                ptr[i].push_back(psi.size() + 2);
+                ptr[i].push_back(psi.size());
+                psi.push_back(W_unit[i]);
+                psi.push_back(1);
+                psi.push_back(0);
+                psi.push_back(0);
+            }
+            if (W_unit[-i] > 0) {
+                ++c;
+                ++c2;
+                ptr[i].push_back(psi.size() + 3);
+                ptr[i].push_back(psi.size());
+                psi.push_back(W_unit[-i]);
+                psi.push_back(1);
+                psi.push_back(0);
+                psi.push_back(0);
+            }
+            for (vector<int>::iterator it = appears[i].begin();
+                 it != appears[i].end(); ++it) {
+                if (all_clauses.getDeleteFlag(*it)) continue;
+                ++c;
+                const int_c *literals = all_clauses.getLiterals(*it);
+                if (*literals != i) continue;
+                ++c2;
+                int start = psi.size();
+                psi.push_back(all_clauses.getWeight(*it));
+                psi.push_back(all_clauses.getLength(*it));
+                for (int j = all_clauses.getLength(*it) - 1; j >= 0; --j) {
+                    int ii = abs(literals[j]);
+                    ptr[ii].push_back(psi.size() + (literals[j] < 0));
+                    ptr[ii].push_back(start);
+                    psi.push_back(0);
+                    psi.push_back(0);
+                }
+            }
+            for (vector<int>::iterator it = appears[-i].begin();
+                 it != appears[-i].end(); ++it) {
+                if (all_clauses.getDeleteFlag(*it)) continue;
+                ++c;
+                const int_c *literals = all_clauses.getLiterals(*it);
+                if (*literals != -i) continue;
+                ++c2;
+                int start = psi.size();
+                psi.push_back(all_clauses.getWeight(*it));
+                psi.push_back(all_clauses.getLength(*it));
+                for (int j = all_clauses.getLength(*it) - 1; j >= 0; --j) {
+                    int ii = abs(literals[j]);
+                    ptr[ii].push_back(psi.size() + (literals[j] < 0));
+                    ptr[ii].push_back(start);
+                    psi.push_back(0);
+                    psi.push_back(0);
+                }
+            }
+        }
+        if ((c + c2) * 2 != (int)psi.size())
+            printf("%d %d\n", (c + c2) * 2, (int)psi.size());
+        bool stop = false;
+        vector<double> old;
+        int iter = 0;
+        double maxdiff;
+        while (!stop && (iter++ < 100 || (!n_assigned && iter++ < 1000))) {
+            stop = true;
+            maxdiff = 1e-6;
+            for (int ii = 0; ii < l; ++ii) {
+                int i = literal_order[ii].second;
+                double m1 = 0, m2 = 0;
+                old.clear();
+                for (vector<int>::iterator it = ptr[i].begin();
+                     it != ptr[i].end(); ++it) {
+                    int isneg = (*it & 1);
+                    int p = *it++ - isneg;
+                    old.push_back(psi[p]);
+                    old.push_back(psi[p + 1]);
+                    psi[p] = clause_height(*it, p, 1);
+                    psi[p + 1] = clause_height(*it, p, 0);
+                    if (isneg) {
+                        m1 += psi[p + 1];
+                        m2 += psi[p];
+                    } else {
+                        m1 += psi[p];
+                        m2 += psi[p + 1];
+                    }
+                }
+                m1 /= (ptr[i].size() / 2);
+                m2 /= (ptr[i].size() / 2);
+                vector<double>::iterator it2 = old.begin();
+                double sum1 = 0, sum2 = 0;
+                for (vector<int>::iterator it = ptr[i].begin();
+                     it != ptr[i].end(); ++it) {
+                    int isneg = (*it & 1);
+                    int p = *it++ - isneg;
+                    if (isneg) {
+                        psi[p + 1] -= m1;
+                        psi[p] -= m2;
+                        sum1 += psi[p + 1];
+                        sum2 += psi[p];
+                    } else {
+                        psi[p] -= m1;
+                        psi[p + 1] -= m2;
+                        sum1 += psi[p];
+                        sum2 += psi[p + 1];
+                    }
+                    if (fabs(psi[p] - *it2) > maxdiff) {
+                        maxdiff = fabs(psi[p] - *it2);
+                        stop = false;
+                    }
+                    ++it2;
+                    if (fabs(psi[p + 1] - *it2) > maxdiff) {
+                        maxdiff = fabs(psi[p + 1] - *it2);
+                        stop = false;
+                    }
+                    ++it2;
+                }
+                if (fabs(sum1) > 1e-7 || fabs(sum2) > 1e-7) {
+                    printf("%lf %lf\n", sum1, sum2);
+                    exit(1);
+                }
+            }
+        }
+        double lb = 0;
+        for (int i = 0; i < (int)psi.size();) {
+            lb += psi[i] - clause_height(i, -1, 0);
+            i += psi[i + 1] * 2 + 2;
+        }
+        lb = ceil(lb - 1e-9);
+        if (lb >= needed_for_skip) {
+            //	printf("success in depth %d\n", n_assigned);
+            needed_for_skip = 0;
+            return;
+        }
+        if (n_assigned == 0)
+            printf("%lf iter=%d maxdiff=%lf\n", lb, iter, maxdiff);
+        needed_for_skip -= (long long)lb;
+#endif
+#ifndef NDEBUG
         for (int i = 1; i <= nVars; ++i)
             assert(literal_data[i] == 0 && literal_data[-i] == 0);
+#endif
     }
 
     // public functions
@@ -1920,17 +2481,37 @@ class CNF_Formula {
                 nVars, maxVn);
         // store in mapping the original variable number of each new variable
         mapping = new int[nVars + 1];
+#ifdef STATS
+        explored = new int[nVars + 1];
+        sum_cost = new long long[nVars + 1];
+        memset(explored, 0, sizeof(int) * (nVars + 1));
+        memset(sum_cost, 0, sizeof(long long) * (nVars + 1));
+#endif
         for (int i = 1; i <= maxVn; ++i) {
             if (maps_to[i] < 0) continue;
             assert(maps_to[i] > 0 && maps_to[i] <= nVars);
             mapping[maps_to[i]] = i;
         }
         vars_top = -1;
+#ifdef FUIP
+        tadj = new vector<int>[2 * nVars];
+        succ_cnt_fuip = total_cnt_fuip = 0;
+        ref_cnt = new int[2 * nVars];
+        Q2 = new int[2 * nVars];
+        visit2 = new char[2 * nVars];
+#endif
         ptr = new vector<int>[2 * nVars + 1];
         vars = new int[2 * nVars];
         Q = new int[2 * nVars];
         cost = new ULL[nVars + 1];
         cost[0] = 0;
+#ifdef PROP_LIST
+        propagation_stack = new int[nVars * 2];
+        propagation_stack_size = 0;
+        onstack = new int[nVars * 2 + 1];
+        memset(onstack, -1, sizeof(int) * (2 * nVars + 1));
+        onstack += nVars;
+#endif
         W_unit = new TL[2 * nVars + 1];
         W_binary = new TL[2 * nVars + 1];
         W_large = new TL[2 * nVars + 1];
@@ -2024,6 +2605,7 @@ class CNF_Formula {
     //! get the type of the instance
     inline bool isWeighted() const { return isWcnf; }
 
+    // mullzhang's additon
     inline vector<int> getSolution() const {
         vector<int> solution(nVars);
         int j = 0;
@@ -2043,7 +2625,15 @@ class CNF_Formula {
     //! print the optimal solution in the maxsat evaluation format
     inline void printSolution() const {
         printf("c total generalized unit propagation = %d, success = %.2lf%%\n",
-               total_gup, 100.0 * succ_gup / total_gup);
+               total_gup, 100.0 * (1.0 - succ_gup / total_gup));
+#ifdef STATS
+        printf("c number of nodes expanded per level:\n");
+        for (int i = 1; i <= nVars; ++i) {
+            if (explored[i] > 0)
+                printf("c depth %d: %d %lld\n", i, explored[i],
+                       sum_cost[i] / explored[i]);
+        }
+#endif
         if (bestCost == hard) {
             puts("s UNSATISFIABLE");
             return;
@@ -2072,6 +2662,7 @@ class CNF_Formula {
      */
     inline TL getLength(int L) const {
         assert(!assigned_values[abs(L)]);
+#ifndef NDEBUG
         TL sum = 0;
         for (vector<int>::const_iterator it = appears[L].begin();
              it != appears[L].end(); ++it)
@@ -2079,6 +2670,7 @@ class CNF_Formula {
                 all_clauses.getLength(*it) > 1)
                 sum += all_clauses.getWeight(*it);
         assert(sum == W_binary[L] + W_large[L]);
+#endif
         return W_large[L] + W_binary[L] + W_unit[L];
     }
     //! get number of unit clauses involving literal L
@@ -2092,6 +2684,7 @@ class CNF_Formula {
     /*! \param L literal L
      */
     inline TL getBinaryLength(int L) const {
+#ifndef NDEBUG
         TL sum = 0;
         for (vector<int>::const_iterator it = appears[L].begin();
              it != appears[L].end(); ++it)
@@ -2099,6 +2692,7 @@ class CNF_Formula {
                 all_clauses.getLength(*it) == 2)
                 sum += all_clauses.getWeight(*it);
         assert(W_binary[L] == sum);
+#endif
         return W_binary[L];
     }
     //! check if an assignment of L exceeds bestCost
@@ -2114,6 +2708,9 @@ class CNF_Formula {
      */
     inline bool assignLiteral(int L) {
         if (!assignmentPossible(L)) return false;
+#ifdef DEBUG
+        cout << "assign literal " << L << endl;
+#endif
         assert(-nVars <= L && L <= nVars && L != 0 &&
                assigned_values[abs(L)] == 0);
         assert(W_unit[-L] == W_unit_save[-L]);
@@ -2124,6 +2721,24 @@ class CNF_Formula {
         assigned_literals[n_assigned++] = L;
         all_clauses.assignVariable(-L);
         removeLiteral(-L);
+#ifdef STATS
+        ++explored[n_assigned];
+        sum_cost[n_assigned] += cost[n_assigned];
+        if (n_assigned == nVars) {
+            int mexpl = 0;
+            for (int i = 1; i <= nVars; ++i) {
+                if (explored[i] >= explored[mexpl]) mexpl = i;
+                /*
+                if (explored[i] > 0)
+                        printf("c depth %d: %d %llu\n", i, explored[i],
+                sum_cost[i]/explored[i]);
+                */
+            }
+            printf("c maximum explored in depth %d\n", mexpl);
+            //		for (int i=1; i<=nVars; ++i)
+            //			sum_cost[i] = explored[i] = 0;
+        }
+#endif
         // is it a complete assignment?
         if (n_assigned == nVars) {
             memcpy(bestA, assigned_values, sizeof(char) * (nVars + 1));
@@ -2142,6 +2757,9 @@ class CNF_Formula {
     void unassignLiteral() {
         assert(n_assigned > 0);
         int L = assigned_literals[n_assigned - 1];
+#ifdef DEBUG
+        cout << "unassign literal " << L << endl;
+#endif
         restoreClauses(L);
         --n_assigned;
         assigned_values[abs(L)] = 0;
@@ -2172,7 +2790,16 @@ class CNF_Formula {
             // check if we need to reinsert it into appears lists
             for (int i = 0; i < l; ++i) {
                 if (literals[i] == L) continue;
+#ifdef DEBUG
+                if (assigned_values[abs(literals[i])]) {
+                    for (int j = 0; j < l; ++j)
+                        printf("%d(%d) ", literals[j],
+                               assigned_values[abs(literals[j])]);
+                    printf("L = %d\n", L);
+                }
+#endif
                 assert(!assigned_values[abs(literals[i])]);
+#ifndef NDEBUG
                 bool found = false;
                 for (vector<int>::const_iterator it2 =
                          appears[literals[i]].begin();
@@ -2181,19 +2808,25 @@ class CNF_Formula {
                         found = true;
                         break;
                     }
+#endif
                 assert(appears_len[literals[i]] ==
                        (int)appears[literals[i]].size());
                 if (appears_traversed[literals[i]] > appears_traversed[L]) {
+#ifndef NDEBUG
                     if (found)
                         printf("%d %llu %lld %lld\n", l,
                                all_clauses.getWeight(*it),
                                appears_traversed[literals[i]],
                                appears_traversed[L]);
                     assert(!found);
+#endif
                     appears[literals[i]].push_back(*it);
                     ++appears_len[literals[i]];
-                } else
+                }
+#ifndef NDEBUG
+                else
                     assert(found);
+#endif
             }
         }
     }
@@ -2203,14 +2836,24 @@ class CNF_Formula {
      * transformations with inference rules
      */
     ULL bestMinusLowerBound() {
+#ifdef RBFS
+        if (n_assigned == nVars) return cost[n_assigned];
+        needed_for_skip = MAXWEIGHT - cost[n_assigned];
+#else
         needed_for_skip = bestCost - cost[n_assigned];
+#endif
         changed.clear();
         assert(n_assigned < nVars);
         if (!needed_for_skip) return 0;
         ++timestamp;
+#ifdef DEBUG
+        cout << "compute lower bound" << endl;
+#endif
+#ifndef NDEBUG
         for (int i = 1; i <= nVars; ++i)
             if (!assigned_values[i])
                 assert(literal_data[i] <= 0 && literal_data[-i] <= 0);
+#endif
         // binary resolution of clauses (i, x) and (-i, x)
         // ternary resolution of clauses (i, x, y) (-i, x, y)
         for (int i = 1; i <= nVars; ++i) {
@@ -2219,10 +2862,28 @@ class CNF_Formula {
             assert(W_unit[i] == W_unit_save[i]);
             //		if (n_assigned <= nVars/3) {
             W_unit[i] += binary_ternary_resolution(i);
+#ifdef PROP_LIST
+            // check if the literal i can be propagated
+            if (onstack[i] < 0 &&
+                W_unit[i] + (TL)cost[n_assigned] >= (TL)bestCost) {
+                onstack[i] = propagation_stack_size;
+                propagation_stack[propagation_stack_size++] = i;
+            }
+#endif
             assert(W_unit[-i] == W_unit_save[-i]);
             W_unit[-i] += binary_ternary_resolution(-i);
+#ifdef PROP_LIST
+            // check if the literal -i can be propagated
+            if (onstack[-i] < 0 &&
+                W_unit[i] + (TL)cost[n_assigned] >= (TL)bestCost) {
+                onstack[-i] = propagation_stack_size;
+                propagation_stack[propagation_stack_size++] = -i;
+            }
+#endif
+            //		}
         }
         // now save information to be able to restore the old clause data
+        //	if (n_assigned <= nVars/3)
         for (int i = 1; i <= nVars && needed_for_skip > 0; ++i) {
             if (assigned_values[i]) continue;
             TL mw = min(W_unit[i], W_unit[-i]);
@@ -2299,6 +2960,7 @@ class CNF_Formula {
         ULL ret = needed_for_skip;
         for (int i = 1; i <= nVars; ++i) {
             if (assigned_values[i]) continue;
+#ifndef NDEBUG
             for (vector<int>::const_iterator it = appears[i].begin();
                  it != appears[i].end(); ++it)
                 assert(all_clauses.getSavedWeight(*it) ==
@@ -2307,6 +2969,7 @@ class CNF_Formula {
                  it != appears[-i].end(); ++it)
                 assert(all_clauses.getSavedWeight(*it) ==
                        all_clauses.getWeight(*it));
+#endif
             if (appears_len[i] < (int)appears[i].size()) {
                 reverse(appears[i].begin() + appears_len[i], appears[i].end());
                 appears_len[i] = appears[i].size();
@@ -2328,10 +2991,28 @@ class CNF_Formula {
         if (n_assigned == 0)
             printf("c first lower bound: %llu\n",
                    (unsigned long long)(bestCost - ret));
+#ifdef RBFS
+        return MAXWEIGHT - ret;
+#endif
         return ret;
     }
     //! CNF_Formula destructor
     ~CNF_Formula() {
+#ifdef DEBUG
+        printf("c finished with timestamp %lld\n", timestamp);
+#endif
+#ifdef FUIP
+        printf("c fuip statistics: %.2lf%% cases had improvements\n",
+               (100.0 * succ_cnt_fuip) / total_cnt_fuip);
+        delete[] tadj;
+        delete[] visit2;
+        delete[] Q2;
+        delete[] ref_cnt;
+#endif
+#ifdef STATS
+        delete[] sum_cost;
+        delete[] explored;
+#endif
         // subtract nVars to get to the beginning of the arrays
         W_unit -= nVars;
         W_binary -= nVars;
@@ -2364,6 +3045,11 @@ class CNF_Formula {
         delete[] bestA;
         delete[] W_lb;
         delete[] cost;
+#ifdef PROP_LIST
+        onstack -= nVars;
+        delete[] onstack;
+        delete[] propagation_stack;
+#endif
     }
     inline ULL getHardWeight() const { return hard; }
     //! return the best cost of a complete assignment found so far
@@ -2375,6 +3061,26 @@ class CNF_Formula {
         for (int i = 1; i <= maxVn; ++i)
             if (maps_to[i] > 0) bestA[maps_to[i]] = besta[i];
     }
+#ifdef PROP_LIST
+    //! check if a literal can be propagated because there is a hard unit clause
+    inline int propagateLiteral() {
+        int L;
+        // check the literals on the propagation stack if they can still be
+        // propagated
+        while (propagation_stack_size > 0) {
+            // remove the top literal
+            L = propagation_stack[propagation_stack_size - 1];
+            --propagation_stack_size;
+            onstack[L] = -1;
+            if ((TL)W_unit[L] + (TL)cost[n_assigned] >=
+                (TL)bestCost /* || getLength(-L) <= W_unit[L]*/) {
+                assert(!assigned_values[abs(L)]);
+                return L;
+            }
+        }
+        return 0;
+    }
+#endif
 };
 
 #endif
