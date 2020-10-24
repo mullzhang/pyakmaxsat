@@ -23,19 +23,18 @@ class AKMaxSATSolver(dimod.Sampler):
     def parameters(self):
         return self._parameters
 
-    def sample(self, bqm):
-        Q, offset = bqm.to_qubo()
-        sampleset = self.sample_qubo(Q)
-        return sampleset.change_vartype(bqm.vartype, energy_offset=offset, inplace=False)
-
     def sample_ising(self, h, J):
         bqm = dimod.BinaryQuadraticModel.from_ising(h, J)
         return self.sample(bqm)
 
     def sample_qubo(self, Q):
         bqm = dimod.BinaryQuadraticModel.from_qubo(Q)
-        linear = [v for i, v in sorted(bqm.linear.items(), key=lambda x: x[0])]
-        quadratic = [[i, j, v] for (i, j), v in bqm.quadratic.items()]
+        return self.sample(bqm)
+
+    def sample(self, bqm):
+        _bqm = bqm.change_vartype(dimod.BINARY, inplace=False)
+        linear = [v for i, v in sorted(_bqm.linear.items(), key=lambda x: x[0])]
+        quadratic = [[i, j, v] for (i, j), v in _bqm.quadratic.items()]
 
         file_ID, filename = tempfile.mkstemp()
         try:
@@ -45,7 +44,11 @@ class AKMaxSATSolver(dimod.Sampler):
         finally:
             os.remove(filename)
 
-        solution = np.where(np.array(raw_solution) == -1, 1, 0)
+        if bqm.vartype == dimod.BINARY:
+            solution = np.where(np.array(raw_solution) == -1, 1, 0)
+        elif bqm.vartype == dimod.SPIN:
+            solution = np.where(np.array(raw_solution) == -1, 1, -1)
+
         return dimod.SampleSet.from_samples_bqm(np.array(solution), bqm)
 
     @staticmethod
@@ -57,7 +60,7 @@ class AKMaxSATSolver(dimod.Sampler):
         for i, _ in enumerate(linear):
             if linear_corr[i] == 0:
                 continue
-            _linear[np.sign(linear_corr[i]) * (i + 1)] = np.abs(linear_corr[i])
+            _linear[-np.sign(linear_corr[i]) * (i + 1)] = np.abs(linear_corr[i])
 
         _quadratic = {}
         for edge, _ in enumerate(quadratic):
@@ -65,10 +68,10 @@ class AKMaxSATSolver(dimod.Sampler):
             j = quadratic[edge][1] + 1
 
             if quadratic[edge][2] > 0:
-                _quadratic[(i, j)] = _quadratic.get((i, j), 0) + quadratic_corr[edge]
+                _quadratic[(-i, -j)] = _quadratic.get((i, j), 0) + quadratic_corr[edge]
             elif quadratic[edge][2] < 0:
-                _linear[-i] = _linear.get(-i, 0) - quadratic_corr[edge]
-                _quadratic[(i, -j)] = _quadratic.get((i, -j), 0) - quadratic_corr[edge]
+                _linear[i] = _linear.get(-i, 0) - quadratic_corr[edge]
+                _quadratic[(-i, j)] = _quadratic.get((i, -j), 0) - quadratic_corr[edge]
 
         _linear_reduced = {}
         for i, _ in enumerate(linear):
@@ -85,11 +88,11 @@ class AKMaxSATSolver(dimod.Sampler):
         for i, v in _linear_reduced.items():
             if v == 0:
                 continue
-            file.write("%d %d 0\n" % (v, i))
+            file.write("%d %d 0\n" % (v, -i))
         for (i, j), v in _quadratic.items():
             if v == 0:
                 continue
-            file.write("%d %d %d 0\n" % (v, i, j))
+            file.write("%d %d %d 0\n" % (v, -i, -j))
 
     def sample_wcnf(self, filename):
         if os.path.isfile(filename):
