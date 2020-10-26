@@ -32,7 +32,9 @@ class AKMaxSATSolver(dimod.Sampler):
         return self.sample(bqm)
 
     def sample(self, bqm):
-        _bqm = bqm.change_vartype(dimod.BINARY, inplace=False)
+        bqm_relabeld, label_mappings = bqm.relabel_variables_as_integers(inplace=False)
+        _bqm = bqm_relabeld.change_vartype(dimod.BINARY, inplace=False)
+
         linear = [v for i, v in sorted(_bqm.linear.items(), key=lambda x: x[0])]
         quadratic = [[i, j, v] for (i, j), v in _bqm.quadratic.items()]
 
@@ -49,7 +51,8 @@ class AKMaxSATSolver(dimod.Sampler):
         elif bqm.vartype == dimod.SPIN:
             solution = np.where(np.array(raw_solution) == -1, 1, -1)
 
-        return dimod.SampleSet.from_samples_bqm(np.array(solution), bqm)
+        sampleset = dimod.SampleSet.from_samples_bqm(np.array(solution), bqm_relabeld)
+        return sampleset.relabel_variables(label_mappings, inplace=False)
 
     @staticmethod
     def convert_to_wcnf(linear, quadratic, file, precision=1e-6):
