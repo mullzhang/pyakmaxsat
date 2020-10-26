@@ -6,8 +6,46 @@ AK-MaxSAT is a complete solver for MaxSAT, guaranteed to find the optimal assign
 
 PyAKMAXSAT has a solver that inherits the Sampler class defined in D-Wave Ocean SDK. It can also output the BinaryQuadraticModel(BQM) which is compatible with the class.
 
-## install
+## Installation
+### cmake setup
+
+If you had not installed cmake>=3.11.2, you need install cmake>=3.11.2
+
+* macOS
+```
+$ brew install cmake
+```
+
+* Linux
+```
+# if you installed old version by apt-get
+$ apt-get purge cmake
+
+# install cmake 
+$ wget https://cmake.org/files/v3.11/cmake-3.11.2.tar.gz
+$ tar xvf cmake-3.11.2.tar.gz
+$ cd cmake-3.11.2
+$ ./bootstrap && make && sudo make install 
+```
+
+* Windows
+
+Please install cmake from [here](https://cmake.org/download/).
+
+Alternatively, you can use
+```
+$ pip install -U cmake
+```
+
+Make sure the enviroment path for CMake is set correctly.
+
 ### install from github repository
+
+```
+$ pip install git+https://github.com/mullzhang/pyakmaxsat.git
+```
+
+or
 
 ```
 $ git clone git@github.com:mullzhang/pyakmaxsat
@@ -16,7 +54,6 @@ $ python setup.py install
 ```
 
 ## How to use
-### Python example
 
 ```Python
 import random
@@ -32,5 +69,12 @@ bqm = model.to_bqm()
 
 solver = AKMaxSATSolver()
 sampleset = solver.sample(bqm)
+print(sampleset)
+```
+
+```Python
+from pyakmaxsat import AKMaxSATSolver
+solver = AKMaxSATSolver()
+sampleset = solver.sample_wcnf('path/to/file.wcnf')
 print(sampleset)
 ```
