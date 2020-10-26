@@ -26,7 +26,6 @@ class AKMaxSATSolver(dimod.Sampler):
     def max_precision(bqm):
         max_abs_coeff = np.max(np.abs(bqm.to_numpy_matrix()))
         precision = 10 ** (np.floor(np.log10(max_abs_coeff)) - 4)
-        print(max_abs_coeff, precision)
         return precision
 
     def sample_ising(self, h, J):
