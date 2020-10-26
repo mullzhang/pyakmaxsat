@@ -28,6 +28,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <pybind11/pybind11.h>
 
 #include "cnf_formula.hpp"
 
@@ -311,6 +312,10 @@ void fast_backtrack(CNF_Formula<long long> &cf) {
     }
     int *pit = variables + nvariables - 1;
     do {
+        if (PyErr_CheckSignals() != 0) {
+            throw pybind11::error_already_set();
+        }
+
         if (variable_stack_len == cf.getNVars()) {
             do_lb_calc = true;
             goto goback;
