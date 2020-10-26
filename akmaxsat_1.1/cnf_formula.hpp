@@ -2651,8 +2651,7 @@ true);
             else {
                 ++j;
                 assert(j <= nVars);
-                // printf(" %d", (int)bestA[j] * mapping[j]);
-                printf(" %d", (int)bestA[j]);
+                printf(" %d", (int)bestA[j] * mapping[j]);
             }
         assert(j == nVars);
         putchar('\n');

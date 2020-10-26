@@ -23,11 +23,14 @@ import random
 from pyakmaxsat import AKMaxSATSolver
 
 N = 15
-h = {}
-J = {(i, j): random.randint(-5, 5)
-     for i in range(N) for j in range(i + 1, N)}
+K = 3
+numbers = [random.uniform(0, 5) for _ in range(N)]
+q = Array.create('q', N, 'BINARY')
+H = sum(numbers[i] * q[i] for i in range(N)) + 5.0 * (sum(q) - K)**2
+model = H.compile()
+bqm = model.to_bqm()
 
-solver = AKMaxSATSolver(precision=1e-6)
-sampleset = solver.sample_ising(h, J)
+solver = AKMaxSATSolver()
+sampleset = solver.sample(bqm)
 print(sampleset)
 ```
