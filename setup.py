@@ -71,7 +71,7 @@ python_requires = '>=3.5'
 
 setup(
     name='pyakmaxsat',
-    version='0.0.1',
+    version='0.0.2',
     author='mullzhang',
     author_email='mullzhang@users.noreply.github.com',
     description='Python binding of AK-MaxSAT',
