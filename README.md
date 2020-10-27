@@ -57,6 +57,7 @@ $ python setup.py install
 
 ```Python
 import random
+from pyqubo import Array
 from pyakmaxsat import AKMaxSATSolver
 
 N = 15
@@ -74,6 +75,7 @@ print(sampleset)
 
 ```Python
 from pyakmaxsat import AKMaxSATSolver
+
 solver = AKMaxSATSolver()
 sampleset = solver.sample_wcnf('path/to/file.wcnf')
 print(sampleset)
