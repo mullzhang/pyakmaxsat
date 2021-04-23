@@ -37,6 +37,9 @@ class AKMaxSATSolver(dimod.Sampler):
         return self.sample(bqm)
 
     def sample(self, bqm):
+        if bqm.num_interactions == 0:
+            raise Exception('Only problem with interactions is solvable')
+
         label_mappings = {label: i for i, label in enumerate(sorted(bqm.variables))}
         bqm_relabeled = bqm.relabel_variables(label_mappings, inplace=False)
         _bqm = bqm_relabeled.change_vartype(dimod.BINARY, inplace=False)
@@ -65,24 +68,12 @@ class AKMaxSATSolver(dimod.Sampler):
     @staticmethod
     def convert_to_wcnf(linear, quadratic, file, precision):
         linear_corr = np.round(np.array(linear) / precision)
-        quadratic_corr = np.round(np.array(quadratic)[:, 2] / precision)
 
         _linear = {}
         for i, _ in enumerate(linear):
             if linear_corr[i] == 0:
                 continue
             _linear[-np.sign(linear_corr[i]) * (i + 1)] = np.abs(linear_corr[i])
-
-        _quadratic = {}
-        for edge, _ in enumerate(quadratic):
-            i = quadratic[edge][0] + 1
-            j = quadratic[edge][1] + 1
-
-            if quadratic[edge][2] > 0:
-                _quadratic[(-i, -j)] = _quadratic.get((i, j), 0) + quadratic_corr[edge]
-            elif quadratic[edge][2] < 0:
-                _linear[i] = _linear.get(-i, 0) - quadratic_corr[edge]
-                _quadratic[(-i, j)] = _quadratic.get((i, -j), 0) - quadratic_corr[edge]
 
         _linear_reduced = {}
         for i, _ in enumerate(linear):
@@ -93,17 +84,34 @@ class AKMaxSATSolver(dimod.Sampler):
                 _linear_reduced[-i] = -weight
 
         num_variables = len(linear)
-        num_clauses = len(_linear_reduced) + len(_quadratic)
-        file.write("p wcnf %d %d\n" % (num_variables, num_clauses))
+        num_clauses = len(_linear_reduced)
 
+        if quadratic:
+            quadratic_corr = np.round(np.array(quadratic)[:, 2] / precision)
+            _quadratic = {}
+            for edge, _ in enumerate(quadratic):
+                i = quadratic[edge][0] + 1
+                j = quadratic[edge][1] + 1
+
+                if quadratic[edge][2] > 0:
+                    _quadratic[(-i, -j)] = _quadratic.get((i, j), 0) + quadratic_corr[edge]
+                elif quadratic[edge][2] < 0:
+                    _linear[i] = _linear.get(-i, 0) - quadratic_corr[edge]
+                    _quadratic[(-i, j)] = _quadratic.get((i, -j), 0) - quadratic_corr[edge]
+
+            num_clauses += len(_quadratic)
+
+        file.write("p wcnf %d %d\n" % (num_variables, num_clauses))
         for i, v in _linear_reduced.items():
             if v == 0:
                 continue
             file.write("%d %d 0\n" % (v, -i))
-        for (i, j), v in _quadratic.items():
-            if v == 0:
-                continue
-            file.write("%d %d %d 0\n" % (v, -i, -j))
+
+        if quadratic:
+            for (i, j), v in _quadratic.items():
+                if v == 0:
+                    continue
+                file.write("%d %d %d 0\n" % (v, -i, -j))
 
     def sample_wcnf(self, filename):
         if os.path.isfile(filename):
